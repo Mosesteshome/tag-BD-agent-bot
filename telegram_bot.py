@@ -25,7 +25,7 @@ ADMIN_USERNAMES = {
     117: "@Joasap",
     121: "Ermias",
     198: "@Himeba1",
-    201: "@Biniyam_girma_1",
+    261: "@Biniyam_girma_1",
     222: "@Belopiia",
     225: "@chere_7",
     227: "Meseret",
@@ -127,17 +127,35 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("An error occurred while saving your information.")
 
 # --- DATABASE FETCH FUNCTIONS ---
-async def get_restaurant_info(restaurant_name: str):
-    query = text("SELECT business_developer_id, phone FROM restaurants WHERE name = :restaurant_name")
+async def get_restaurant_info(order_id: str):
+    query = text("""
+                 
+                 SELECT
+    r.id,
+    r.name as  restaurant_name,
+    r.business_developer_id,
+    r.phone,
+    group_concat(j.phone_number separator ', ')
+    from orders o
+    join restaurants r on o.restaurant_id = r.id
+    JOIN JSON_TABLE(
+    r.optional_phone_numbers,
+    '$[*]' COLUMNS (
+        phone_number VARCHAR(20) PATH '$.value'
+    )
+) AS j
+        where o.id= :order_id
+group by r.id
+                 """)
     try:
         async with engine.connect() as connection:
-            result = await connection.execute(query, {"restaurant_name": restaurant_name})
+            result = await connection.execute(query, {"order_id": order_id})
             row = result.fetchone()
             if row:
-                return row[0], row[1]
+                return row[1], row[2], row[3], row[4]
     except SQLAlchemyError as e:
         print(f"Database error occurred: {e}")
-    return None, None
+    return None, None, None, None
 
 async def get_saved_chat_id(admin_id: int):
     query = text("SELECT chat_id FROM user_info WHERE admin_id = :admin_id")
@@ -145,6 +163,7 @@ async def get_saved_chat_id(admin_id: int):
         async with sql_engine.connect() as connection:
             result = await connection.execute(query, {"admin_id": admin_id})
             row = result.fetchone()
+            
             if row:
                 return row[0]
     except SQLAlchemyError as e:
@@ -160,16 +179,17 @@ async def process_number_and_tag(update: Update, context: ContextTypes.DEFAULT_T
         if not message_text:
             return
 
-        match = re.search(r'\(([^)]+)\)', message_text)
+        match = re.search(r'(?<!\d)(4\d{6})(?=\()', message_text)
+
         
         if match:
-            restaurant_name = match.group(1).strip()
-            if not restaurant_name:
+            order_id = match.group(1).strip()
+            if not order_id:
                 return
                 
-            print(f"Extracted restaurant: {restaurant_name}") 
+            print(f"Extracted order ID: {order_id}") 
             
-            admin_id, phone = await get_restaurant_info(restaurant_name)
+            restaurant_name,admin_id, phone, optional_phone_numbers = await get_restaurant_info(order_id)
             
             if admin_id:
                 # --- SAVE INITIAL MESSAGE TO bd_replies ---
@@ -202,13 +222,16 @@ async def process_number_and_tag(update: Update, context: ContextTypes.DEFAULT_T
                 if saved_chat_id:
                     chat_title = message.chat.title if message.chat.title else "Private Chat"
                     display_phone = phone if phone else "Not available"
+                    display_optional_phones = optional_phone_numbers if optional_phone_numbers else "Not available"
                     message_link = message.link 
+                    
                     
                     inbox_text = (
                         f"🔔 <b>New Tag Alert!</b>\n\n"
                         f"<b>Group:</b> {html.escape(chat_title)}\n"
                         f"<b>Restaurant:</b> {html.escape(restaurant_name)}\n"
                         f"<b>Phone:</b><code> {html.escape(str(display_phone))}</code>\n\n"
+                        f"<b>Optional Phones:</b><code> {html.escape(str(display_optional_phones))}</code>\n\n"
                         f"<b>Message:</b>\n<i>{html.escape(message_text)}</i>"
                     )
                     
@@ -288,7 +311,7 @@ async def main():
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        .read_timeout(60)
+            .get_updates_read_timeout(60)
         .write_timeout(60)
         .connect_timeout(60)
         .pool_timeout(60)
@@ -310,9 +333,8 @@ async def main():
     
     await application.updater.start_polling(
         allowed_updates=Update.ALL_TYPES,
-        timeout=60,
-        read_timeout=60
-    )
+        timeout=60
+        )
     await asyncio.Event().wait()
 
 if __name__ == '__main__':
