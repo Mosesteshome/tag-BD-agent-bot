@@ -1,0 +1,2 @@
+# start_bot.sh runs under bash on the server; CRLF breaks it
+*.sh text eol=lf
