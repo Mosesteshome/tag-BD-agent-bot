@@ -138,12 +138,12 @@ async def get_restaurant_info(order_id: str):
     group_concat(j.phone_number separator ', ')
     from orders o
     join restaurants r on o.restaurant_id = r.id
-    JOIN JSON_TABLE(
+    LEFT JOIN JSON_TABLE(
     r.optional_phone_numbers,
     '$[*]' COLUMNS (
         phone_number VARCHAR(20) PATH '$.value'
     )
-) AS j
+) AS j ON TRUE
         where o.id= :order_id
 group by r.id
                  """)
@@ -179,7 +179,7 @@ async def process_number_and_tag(update: Update, context: ContextTypes.DEFAULT_T
         if not message_text:
             return
 
-        match = re.search(r'(?<!\d)(4\d{6})(?=\()', message_text)
+        match = re.search(r'(?<!\d)(\d{7})(?!\d)', message_text)
 
         
         if match:
@@ -252,7 +252,7 @@ async def process_number_and_tag(update: Update, context: ContextTypes.DEFAULT_T
                         print(f"Failed to send DM to Admin {admin_id}. Error: {e}")
 
             else:
-                error_text = f"Restaurant '{restaurant_name}' was not found in the database."
+                error_text = f"Order {order_id} was not found in the database."
                 await message.reply_text(error_text, reply_to_message_id=message.message_id)
 
     except Exception as e:
